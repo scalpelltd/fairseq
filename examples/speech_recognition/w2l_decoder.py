@@ -34,7 +34,7 @@ try:
         SmearingMode,
         Trie,
         LexiconDecoder,
-        LexiconFreeDecoder,
+        # LexiconFreeDecoder,
     )
 except:
     warnings.warn(
