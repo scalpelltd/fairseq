@@ -165,7 +165,7 @@ def do_setup(package_data):
         long_description_content_type="text/markdown",
         setup_requires=[
             "cython",
-            "numpy",
+            "numpy==1.19.3",
             "setuptools>=18.0",
         ],
         install_requires=[
@@ -174,7 +174,7 @@ def do_setup(package_data):
             "dataclasses",
             "editdistance",
             "hydra-core",
-            "numpy",
+            "numpy==1.19.3",
             "regex",
             "sacrebleu>=1.4.12",
             "torch",
