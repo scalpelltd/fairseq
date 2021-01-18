@@ -17,6 +17,7 @@ from fairseq.dataclass.constants import (
     GENERATION_DECODING_FORMAT_CHOICES,
     LOG_FORMAT_CHOICES,
     PIPELINE_CHECKPOINT_CHOICES,
+    PRINT_ALIGNMENT_CHOICES,
     ZERO_SHARDING_CHOICES,
 )
 
@@ -108,6 +109,12 @@ class CommonConfig(FairseqDataclass):
             "help": "Weights and Biases project name to use for logging"
         },
     )
+    azureml_logging: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Log scalars to AzureML context"
+        },
+    )
     seed: int = field(
         default=1, metadata={"help": "pseudo random number generator seed"}
     )
@@ -179,6 +186,13 @@ class CommonConfig(FairseqDataclass):
             "help": "when using Hydra, reset the logging at the beginning of training"
         },
     )
+    suppress_crashes: bool = field(
+        default=False,
+        metadata={
+            "help": "suppress crashes when training with the hydra_train entry point so that the "
+                    "main method can return a value (useful for sweeps)"
+        },
+    )
 
 
 @dataclass
@@ -244,6 +258,13 @@ class DistributedTrainingConfig(FairseqDataclass):
     fast_stat_sync: bool = field(
         default=False,
         metadata={"help": "[deprecated] this is now defined per Criterion"},
+    )
+    heartbeat_timeout: int = field(
+        default=-1,
+        metadata={
+            "help": "kill the job if no progress is made in N seconds; "
+            "set to -1 to disable"
+        }
     )
     broadcast_buffers: bool = field(
         default=False,
@@ -465,7 +486,7 @@ class OptimizationConfig(FairseqDataclass):
             " (note: this may be interpreted differently depending on --lr-scheduler)"
         },
     )
-    min_lr: float = field(
+    stop_min_lr: float = field(
         default=-1.0,
         metadata={"help": "stop training when the learning rate reaches this minimum"},
     )
@@ -581,6 +602,13 @@ class CheckpointConfig(FairseqDataclass):
             "if the checkpoint is over 300GB, it is preferable "
             "to split it into shards to prevent OOM on CPU while loading "
             "the checkpoint"
+        },
+    )
+    load_checkpoint_on_all_dp_ranks: bool = field(
+        default=False,
+        metadata={
+            "help": "load checkpoints on all data parallel devices "
+            "(default: only load on rank 0 and broadcast to other devices)"
         },
     )
     model_parallel_size: int = II("common.model_parallel_size")
@@ -730,10 +758,12 @@ class GenerationConfig(FairseqDataclass):
         default=-1.0,
         metadata={"help": "strength of diversity penalty for Diverse Siblings Search"},
     )
-    print_alignment: bool = field(
-        default=False,
+    print_alignment: Optional[PRINT_ALIGNMENT_CHOICES] = field(
+        default=None,
         metadata={
-            "help": "if set, uses attention feedback to compute and print alignment to source tokens"
+            "help": "if set, uses attention feedback to compute and print alignment to source tokens "
+            "(valid options are: hard, soft, otherwise treated as hard alignment)",
+            "argparse_const": "hard",
         },
     )
     print_step: bool = field(
@@ -815,9 +845,11 @@ class CommonEvalConfig(FairseqDataclass):
     post_process: Optional[str] = field(
         default=None,
         metadata={
-            "help": "post-process text by removing pre-processing such as BPE, letter segmentation, etc "
-            "(valid options are: sentencepiece, wordpiece, letter, _EOW, none, otherwise treated as BPE symbol)",
-            "argparse_const": "@@ ",
+            "help": (
+                "post-process text by removing BPE, letter segmentation, etc. "
+                "Valid options can be found in fairseq.data.utils.post_process."
+            ),
+            "argparse_const": "subword_nmt",
             "argparse_alias": "--remove-bpe",
         },
     )
