@@ -17,10 +17,11 @@ from fairseq.dataclass.constants import (
     GENERATION_DECODING_FORMAT_CHOICES,
     LOG_FORMAT_CHOICES,
     PIPELINE_CHECKPOINT_CHOICES,
+    PRINT_ALIGNMENT_CHOICES,
     ZERO_SHARDING_CHOICES,
 )
 
-from omegaconf import II
+from omegaconf import II, MISSING
 
 
 @dataclass
@@ -102,6 +103,18 @@ class CommonConfig(FairseqDataclass):
             "of running tensorboard (default: no tensorboard logging)"
         },
     )
+    wandb_project: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Weights and Biases project name to use for logging"
+        },
+    )
+    azureml_logging: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Log scalars to AzureML context"
+        },
+    )
     seed: int = field(
         default=1, metadata={"help": "pseudo random number generator seed"}
     )
@@ -167,6 +180,19 @@ class CommonConfig(FairseqDataclass):
     profile: bool = field(
         default=False, metadata={"help": "enable autograd profiler emit_nvtx"}
     )
+    reset_logging: bool = field(
+        default=True,
+        metadata={
+            "help": "when using Hydra, reset the logging at the beginning of training"
+        },
+    )
+    suppress_crashes: bool = field(
+        default=False,
+        metadata={
+            "help": "suppress crashes when training with the hydra_train entry point so that the "
+                    "main method can return a value (useful for sweeps)"
+        },
+    )
 
 
 @dataclass
@@ -198,11 +224,10 @@ class DistributedTrainingConfig(FairseqDataclass):
     )
     device_id: int = field(
         default=0,
-        metadata={"help": "which GPU to use (usually configured automatically)"},
-    )
-    local_rank: int = field(
-        default=0,
-        metadata={"help": "which GPU to use (usually configured automatically)"},
+        metadata={
+            "help": "which GPU to use (usually configured automatically)",
+            "argparse_alias": "--local_rank",
+        },
     )
     distributed_no_spawn: bool = field(
         default=False,
@@ -233,6 +258,13 @@ class DistributedTrainingConfig(FairseqDataclass):
     fast_stat_sync: bool = field(
         default=False,
         metadata={"help": "[deprecated] this is now defined per Criterion"},
+    )
+    heartbeat_timeout: int = field(
+        default=-1,
+        metadata={
+            "help": "kill the job if no progress is made in N seconds; "
+            "set to -1 to disable"
+        }
     )
     broadcast_buffers: bool = field(
         default=False,
@@ -391,16 +423,16 @@ class DatasetConfig(FairseqDataclass):
         default=False, metadata={"help": "disable validation"}
     )
     max_tokens_valid: Optional[int] = field(
-        default=None,
+        default=II("dataset.max_tokens"),
         metadata={
             "help": "maximum number of tokens in a validation batch"
             " (defaults to --max-tokens)"
         },
     )
     batch_size_valid: Optional[int] = field(
-        default=None,
+        default=II("dataset.batch_size"),
         metadata={
-            "help": "batch size of the validation batch" " (defaults to --batch-size)",
+            "help": "batch size of the validation batch (defaults to --batch-size)",
             "argparse_alias": "--max-sentences-valid",
         },
     )
@@ -434,7 +466,7 @@ class OptimizationConfig(FairseqDataclass):
         },
     )
     clip_norm: float = field(
-        default=25.0, metadata={"help": "clip threshold of gradients"}
+        default=0.0, metadata={"help": "clip threshold of gradients"}
     )
     sentence_avg: bool = field(
         default=False,
@@ -454,7 +486,7 @@ class OptimizationConfig(FairseqDataclass):
             " (note: this may be interpreted differently depending on --lr-scheduler)"
         },
     )
-    min_lr: float = field(
+    stop_min_lr: float = field(
         default=-1.0,
         metadata={"help": "stop training when the learning rate reaches this minimum"},
     )
@@ -570,6 +602,13 @@ class CheckpointConfig(FairseqDataclass):
             "if the checkpoint is over 300GB, it is preferable "
             "to split it into shards to prevent OOM on CPU while loading "
             "the checkpoint"
+        },
+    )
+    load_checkpoint_on_all_dp_ranks: bool = field(
+        default=False,
+        metadata={
+            "help": "load checkpoints on all data parallel devices "
+            "(default: only load on rank 0 and broadcast to other devices)"
         },
     )
     model_parallel_size: int = II("common.model_parallel_size")
@@ -719,10 +758,12 @@ class GenerationConfig(FairseqDataclass):
         default=-1.0,
         metadata={"help": "strength of diversity penalty for Diverse Siblings Search"},
     )
-    print_alignment: bool = field(
-        default=False,
+    print_alignment: Optional[PRINT_ALIGNMENT_CHOICES] = field(
+        default=None,
         metadata={
-            "help": "if set, uses attention feedback to compute and print alignment to source tokens"
+            "help": "if set, uses attention feedback to compute and print alignment to source tokens "
+            "(valid options are: hard, soft, otherwise treated as hard alignment)",
+            "argparse_const": "hard",
         },
     )
     print_step: bool = field(
@@ -775,7 +816,9 @@ class GenerationConfig(FairseqDataclass):
         default=False,
         metadata={"help": "Use dropout at inference time"},
     )
-    retain_dropout_modules: Optional[List[str]] = field(
+    # temporarily set to Any until https://github.com/facebookresearch/hydra/issues/1117 is fixed
+    # retain_dropout_modules: Optional[List[str]] = field(
+    retain_dropout_modules: Any = field(
         default=None,
         metadata={
             "help": "if set, only retain dropout for the specified modules; "
@@ -802,9 +845,11 @@ class CommonEvalConfig(FairseqDataclass):
     post_process: Optional[str] = field(
         default=None,
         metadata={
-            "help": "post-process text by removing pre-processing such as BPE, letter segmentation, etc "
-            "(valid options are: sentencepiece, wordpiece, letter, _EOW, none, otherwise treated as BPE symbol)",
-            "argparse_const": "@@ ",
+            "help": (
+                "post-process text by removing BPE, letter segmentation, etc. "
+                "Valid options can be found in fairseq.data.utils.post_process."
+            ),
+            "argparse_const": "subword_nmt",
             "argparse_alias": "--remove-bpe",
         },
     )
@@ -863,7 +908,7 @@ class InteractiveConfig(FairseqDataclass):
 
 
 @dataclass
-class FairseqConfig(object):
+class FairseqConfig(FairseqDataclass):
     common: CommonConfig = CommonConfig()
     common_eval: CommonEvalConfig = CommonEvalConfig()
     distributed_training: DistributedTrainingConfig = DistributedTrainingConfig()
@@ -874,3 +919,11 @@ class FairseqConfig(object):
     generation: GenerationConfig = GenerationConfig()
     eval_lm: EvalLMConfig = EvalLMConfig()
     interactive: InteractiveConfig = InteractiveConfig()
+    model: Any = MISSING
+    task: Any = None
+    criterion: Any = None
+    optimizer: Any = None
+    lr_scheduler: Any = None
+    scoring: Any = None
+    bpe: Any = None
+    tokenizer: Any = None

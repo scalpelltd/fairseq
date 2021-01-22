@@ -131,3 +131,10 @@ data-bin/
 
 # Experimental Folder
 experimental/*
+
+# Weights and Biases logs
+wandb/
+
+# Hydra temp files
+fairseq_cli/.hydra
+
