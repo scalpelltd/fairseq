@@ -24,7 +24,7 @@ dataset:
   max_tokens: 3200000
   skip_invalid_size_inputs_valid_test: true
   validate_after_updates: 10000
-  validate_interval: 10
+  validate_interval: 1000
   valid_subset: dev_other
 
 distributed_training:
